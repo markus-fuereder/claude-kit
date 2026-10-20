@@ -1,0 +1,11 @@
+{
+  "name": "claude-kit",
+  "owner": { "name": "Markus Füreder" },
+  "plugins": [
+    {
+      "name": "session-heating",
+      "source": "./mods/session-heating",
+      "description": "Session Heating: keeps the session's prompt cache warm while you're away"
+    }
+  ]
+}
