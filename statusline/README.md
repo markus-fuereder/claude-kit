@@ -3,9 +3,13 @@
 A two-row statusline command for Claude Code.
 
 ```
-󰫆 Opus 5 ❯ my-project ⎇  feat/add-login-page
-C 34% ▦1M · S 08%󰅀10 ↺04:06 · W 09%󰅀02 ↺6d 05:16
+⁖ Opus 5 ❯ my-project ⎇  feat/add-login-page
+C 34% ▦1M · S 08%▿10 ↺04:06 · W 09%▿02 ↺6d 05:16
 ```
+
+This is the default look, drawn with characters every monospace font has.
+`CLAUDE_CODE_STATUS_BAR_NERD_FONT` swaps the effort and pace glyphs for Nerd
+Font icons.
 
 - Row 1: effort, model, folder and git branch.
 - Row 2: context usage and window size; the 5-hour and weekly rate limits, each
