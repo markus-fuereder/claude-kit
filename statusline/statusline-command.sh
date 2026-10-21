@@ -22,20 +22,25 @@ input=$(cat)
 
 # Session Heating writes its state to ~/.claude/session-heating/<session_id>.json.
 # CLAUDE_CODE_SESSION_HEATING_SHOW_IN_STATUSLINE=1 (or yes) shows it; unset, 0 or
-# no hides it. The session id is matched with a bash regex so no extra jq fork
-# is needed, and the file joins the one jq pass through --slurpfile only when it
-# exists.
-heat_args=(--argjson heat '[]')
+# no hides it. The session id and the state are matched with bash regexes and
+# the file is read with `read`, so no extra fork is needed. Only a whole state
+# word counts: a file read while the mod rewrites it, or anything else in it,
+# shows no icon instead of failing jq.
+heat_state=
 if [[ $CLAUDE_CODE_SESSION_HEATING_SHOW_IN_STATUSLINE == 1 || $CLAUDE_CODE_SESSION_HEATING_SHOW_IN_STATUSLINE == yes ]] \
-  && [[ $input =~ \"session_id\":\ *\"([^\"]+)\" ]] \
-  && [ -f "$HOME/.claude/session-heating/${BASH_REMATCH[1]}.json" ]; then
-  heat_args=(--slurpfile heat "$HOME/.claude/session-heating/${BASH_REMATCH[1]}.json")
+  && [[ $input =~ \"session_id\":\ *\"([^\"]+)\" ]]; then
+  heat_file="$HOME/.claude/session-heating/${BASH_REMATCH[1]}.json"
+  heat_line=
+  [ -f "$heat_file" ] && IFS= read -r heat_line < "$heat_file"
+  if [[ $heat_line =~ \"state\":\"(hot|cold|off)\" ]]; then
+    heat_state=${BASH_REMATCH[1]}
+  fi
 fi
 
 # ── parse, format and count down in a single jq pass ─────────────────────────
 # Fields are '|'-separated: '|' is not IFS whitespace, so empty fields survive
 # `read` intact (tab and newline would collapse into one separator).
-read_fields=$(jq -r "${heat_args[@]}" '
+read_fields=$(jq -r --arg heat "$heat_state" '
   def p2: tostring | if length < 2 then "0" + . else . end;
   def pct: if . == null then "" else (round | tostring) end;
   def countdown:
@@ -72,7 +77,7 @@ read_fields=$(jq -r "${heat_args[@]}" '
   , ((.workspace.current_dir // .cwd // "") | split("/") | last // "")
   , (.workspace.current_dir // .cwd // "")
   , (.effort.level // "")
-  , ($heat[0].state // "")
+  , $heat
   ] | join("|")' <<<"$input")
 
 IFS='|' read -r model size ctx_pct five_pct week_pct five_cd week_cd \
