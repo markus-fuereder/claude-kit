@@ -8,12 +8,11 @@ export type HeatView = {
   state: HeatState
   /** When the next ping is due, in $.clock.now() milliseconds; 0 when none. */
   nextPingAt: number
-  pings: number
-  maxPings: number
-  /** When the hours cap ends heating. */
-  until: number
-  /** When the cache lapsed or will lapse, for the cold state. */
+  /** When the cache lapses if every ping until the hours cap reads it. */
+  warmUntil: number
+  /** When the cache lapsed, for the cold state. */
   lapsedAt: number
+  /** Why heating stopped: while hot after the cap or failed pings, then cold. */
   reason: ColdReason | null
 }
 

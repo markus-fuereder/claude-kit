@@ -56,9 +56,12 @@ as described above.
    hour, and the next ping is scheduled 50 minutes after it.
 4. Heating stops, and the cache is left to lapse, when:
    - a ping reads less than 90% (the cache was already gone),
-   - more than an hour passed since the last refresh (the Mac slept),
+   - more than an hour passed since the last refresh (the machine slept),
    - the hours cap is reached (12 hours away by default),
    - pings keep failing.
+
+   After the cap or failed pings the cache is still warm until an hour after
+   the last ping: the state stays hot until then, and turns cold when it lapses.
 5. Any new prompt cancels the pending ping; the turn refreshes the cache itself.
 
 Only sessions with a person at them heat: the terminal REPL, or a session with a
@@ -94,22 +97,46 @@ and shows a toast.
 | `CLAUDE_CODE_SESSION_HEATING_NERD_FONT` | `no` | Nerd Font icons (the statusline also needs `CLAUDE_CODE_STATUS_BAR_NERD_FONT=yes`) |
 | `CLAUDE_CODE_SESSION_HEATING_SHOW_IN_STATUSLINE` | `no` | Icon after the model in the statusline |
 | `CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT` | `yes` | Band above the prompt while you're away |
+| `CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_SHOW_OFF` | `yes` | Show the band while heating is off for the session; `no` draws nothing then |
 | `CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_COMPACT` | `no` | Compact band instead of the full line |
+| `CLAUDE_CODE_SESSION_HEATING_RELATIVE_TIME` | `yes` | Times in the band as spans (`ping in 12m`); `no` shows clock times (`ping at 14:52`) |
+| `CLAUDE_CODE_SESSION_HEATING_24H_CLOCK` | `yes` | Clock times on a 24-hour clock (`14:52`); `no` shows a 12-hour clock (`2:52pm`) |
 | `CLAUDE_CODE_SESSION_HEATING_SHOW_TOAST` | `yes` | Toasts on a cache miss, the cap and invalid values |
 
 ## Display
 
 | State | Unicode | Nerd Font | Color |
 | --- | --- | --- | --- |
-| Hot: heating | `♨` | `md-radiator` | red (256-color 167) |
-| Cold: heating stopped | `❆` | `md-snowflake` | sky (256-color 45) |
+| Hot: the cache is warm, heating or not | `♨` | `md-radiator` | red (256-color 167) |
+| Cold: heating stopped and the cache lapsed | `❆` | `md-snowflake` | sky (256-color 45) |
 | Off: turned off for this session | `◌` | `md-radiator_off` | grey (256-color 242) |
 
 The band above the prompt shows only while you're away: it is hidden during a
-turn and for 5 minutes after it.
+turn and for 5 minutes after it. It redraws the moment a countdown shows a
+new minute, so its countdowns stay current.
 
-- Full: `♨ heating · next ping 14:52 · 3/14 · until 02:40`
-- Compact: `♨ 14:52 · 3/14`
+| State | Relative (default) | Clock times |
+| --- | --- | --- |
+| Hot | `♨ session warm for 11h 50m · ping in 12m` | `♨ session warm until 02:30 · ping at 14:52` |
+| Hot, no more pings | `♨ session warm for ~48m · pings capped` | `♨ session warm until ~15:28 · pings capped` |
+| Cold | `❆ session cold for 2h 5m · machine slept` | `❆ session cold since 12:35 · machine slept` |
+| Off | `◌ session heating off` | `◌ session heating off` |
+
+The examples are at 14:40, with clock times on the 24-hour clock. The full band
+puts the part after `·` at its right end, across the width of the prompt.
+
+The reasons are `pings capped` and `pings failed` while hot, and `machine
+slept`, `cache miss` and `pings failed` once cold. A cold band after the cap
+names no reason. With `CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_SHOW_OFF=no`
+the off band draws nothing.
+
+The compact band shows the state and its time only: `♨ warm for 11h 50m`,
+`❆ cold for 2h 5m`, `◌ off`.
+
+In the warm band, "for" and "until" give when the cache lapses if every ping
+until the hours cap reads it: an hour after the last one. After the cap or
+failed pings, a `~` marks it as an estimate: cache entries are not documented
+to live the full hour.
 
 The mod writes the state to `~/.claude/session-heating/<session-id>.json`
 (`{"state":"hot"}`, `"cold"` or `"off"`). The statusline in this repo

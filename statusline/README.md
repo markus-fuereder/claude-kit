@@ -61,8 +61,8 @@ writes, and shows its state after the model:
 
 | State | Unicode | Nerd Font | Color |
 | --- | --- | --- | --- |
-| Hot: heating | `♨` | `md-radiator` | red (256-color 167) |
-| Cold: heating stopped | `❆` | `md-snowflake` | sky (256-color 45) |
+| Hot: the cache is warm, heating or not | `♨` | `md-radiator` | red (256-color 167) |
+| Cold: heating stopped and the cache lapsed | `❆` | `md-snowflake` | sky (256-color 45) |
 | Off: turned off for the session | `◌` | `md-radiator_off` | grey (256-color 242) |
 
 Without the mod, no state file exists and no icon is shown.

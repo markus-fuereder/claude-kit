@@ -22,7 +22,8 @@ import type { ColdReason, HeatState, HeatView } from '../types'
 const MINUTE = 60_000
 const TTL_MS = 60 * MINUTE
 // The band shows only while you're away: hidden during a main-thread turn and
-// for AWAY_MS after it ends.
+// for AWAY_MS after it ends. While away it redraws the moment a countdown
+// shows a new minute, so its countdowns stay current.
 const AWAY_MS = 5 * MINUTE
 const RETRY_MS = 2 * MINUTE
 const HIT_RATIO = 0.9
@@ -32,9 +33,7 @@ const isEnabled = atom({ plugin: 'session-heating', key: 'isEnabled' } as const,
 const view = atom({ plugin: 'session-heating', key: 'view' } as const, {
   state: 'off',
   nextPingAt: 0,
-  pings: 0,
-  maxPings: 0,
-  until: 0,
+  warmUntil: 0,
   lapsedAt: 0,
   reason: null,
 } as HeatView)
@@ -53,6 +52,9 @@ type Config = {
   nerdFont: boolean
   showBand: boolean
   compact: boolean
+  showOff: boolean
+  relativeTime: boolean
+  clock24h: boolean
   showToast: boolean
 }
 
@@ -64,6 +66,9 @@ const DEFAULT_CONFIG: Config = {
   nerdFont: false,
   showBand: true,
   compact: false,
+  showOff: true,
+  relativeTime: true,
+  clock24h: true,
   showToast: true,
 }
 
@@ -80,9 +85,8 @@ type Heat = {
   anchorAt: number
   // How much of the last main-thread request the cache held.
   prefixTokens: number
-  pings: number
   pingTimer: Timer | null
-  revealTimer: Timer | null
+  tickTimer: Timer | null
   caffeine: AsyncGenerator<unknown, unknown> | null
 }
 
@@ -120,6 +124,9 @@ async function loadConfig($: EngineInterface, problems: string[]): Promise<Confi
   const nerdFont = await $.env.get('CLAUDE_CODE_SESSION_HEATING_NERD_FONT')
   const showBand = await $.env.get('CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT')
   const compact = await $.env.get('CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_COMPACT')
+  const showOff = await $.env.get('CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_SHOW_OFF')
+  const relativeTime = await $.env.get('CLAUDE_CODE_SESSION_HEATING_RELATIVE_TIME')
+  const clock24h = await $.env.get('CLAUDE_CODE_SESSION_HEATING_24H_CLOCK')
   const showToast = await $.env.get('CLAUDE_CODE_SESSION_HEATING_SHOW_TOAST')
 
   return {
@@ -135,14 +142,36 @@ async function loadConfig($: EngineInterface, problems: string[]): Promise<Confi
     nerdFont: flag('CLAUDE_CODE_SESSION_HEATING_NERD_FONT', nerdFont, false, problems),
     showBand: flag('CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT', showBand, true, problems),
     compact: flag('CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_COMPACT', compact, false, problems),
+    showOff: flag('CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_SHOW_OFF', showOff, true, problems),
+    relativeTime: flag('CLAUDE_CODE_SESSION_HEATING_RELATIVE_TIME', relativeTime, true, problems),
+    clock24h: flag('CLAUDE_CODE_SESSION_HEATING_24H_CLOCK', clock24h, true, problems),
     showToast: flag('CLAUDE_CODE_SESSION_HEATING_SHOW_TOAST', showToast, true, problems),
   }
 }
 
-function hhmm(ms: number) {
+// A clock time: "14:52", or "2:52pm" with the 24-hour clock off.
+function clockTime(heat: Heat, ms: number) {
   const date = new Date(ms)
+  const hours = date.getHours()
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  if (!heat.config.clock24h) return `${hours % 12 || 12}:${minutes}${hours < 12 ? 'am' : 'pm'}`
 
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  return `${String(hours).padStart(2, '0')}:${minutes}`
+}
+
+// A span as the band shows it: "45m", "2h 5m", "<1m".
+function span(ms: number) {
+  const minutes = Math.floor(ms / MINUTE)
+  if (minutes < 1) return '<1m'
+  if (minutes < 60) return `${minutes}m`
+
+  return minutes % 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes / 60}h`
+}
+
+// Time left until a moment, rounded up so the count reaches "<1m" only in the
+// last minute.
+function until(at: number, now: number) {
+  return at - now < MINUTE ? '<1m' : span(Math.ceil((at - now) / MINUTE) * MINUTE)
 }
 
 function capMs(heat: Heat) {
@@ -159,9 +188,29 @@ async function writeStateFile($: EngineInterface, sessionId: string, state: Heat
   if (home) await $.fs.write(`${home}/.claude/session-heating/${sessionId}.json`, `${JSON.stringify({ state })}\n`)
 }
 
-async function setView($: EngineInterface, next: HeatView) {
+async function setView($: EngineInterface, heat: Heat, next: HeatView) {
   await update($, view, () => next)
   await writeStateFile($, await $.session.id(), next.state)
+  await redrawLater($, heat)
+}
+
+// Redraws the band when the away delay ends and each time its countdown
+// shows a new minute: a countdown to `at` changes whenever the time left
+// crosses a whole minute.
+async function redrawLater($: EngineInterface, heat: Heat) {
+  heat.tickTimer?.cancel()
+  heat.tickTimer = null
+  if (heat.isBusy || heat.doneAt === 0) return
+  const now = await $.clock.now()
+  const v = await read($, view)
+  const at = v.state === 'hot' ? v.nextPingAt || v.warmUntil : v.state === 'cold' ? v.lapsedAt : 0
+  let wait = at ? (((at - now) % MINUTE) + MINUTE) % MINUTE || MINUTE : Infinity
+  if (now < heat.doneAt + AWAY_MS) wait = Math.min(wait, heat.doneAt + AWAY_MS - now)
+  if (wait === Infinity) return
+  heat.tickTimer = $.clock.after(wait, () => {
+    $.ui.invalidate('ui.render')
+    void redrawLater($, heat).catch(() => {})
+  })
 }
 
 function cancelPing(heat: Heat) {
@@ -199,23 +248,46 @@ function stopCaffeine(heat: Heat) {
 async function goCold($: EngineInterface, heat: Heat, reason: ColdReason | null, lapsedAt: number) {
   cancelPing(heat)
   stopCaffeine(heat)
-  await setView($, { ...(await read($, view)), state: 'cold', nextPingAt: 0, lapsedAt, reason })
+  await setView($, heat, { ...(await read($, view)), state: 'cold', nextPingAt: 0, lapsedAt, reason })
   if (reason === 'miss') toast($, heat, 'the cache was already gone, heating stopped')
-  if (reason === 'slept') toast($, heat, 'the Mac slept past the cache lifetime, heating stopped')
-  if (reason === 'cap') toast($, heat, `reached the ${heat.config.capHours}h cap, the cache lapses at ${hhmm(lapsedAt)}`)
+  if (reason === 'slept') toast($, heat, 'the machine slept past the cache lifetime, heating stopped')
+}
+
+// No more pings, but the cache stays warm until an hour after its last read:
+// the band stays hot, naming why, and goes cold when the cache lapses.
+async function stopHeating($: EngineInterface, heat: Heat, reason: 'cap' | 'error') {
+  cancelPing(heat)
+  stopCaffeine(heat)
+  if (reason === 'cap') toast($, heat, `reached the ${heat.config.capHours}h cap, heating stopped`)
   if (reason === 'error') toast($, heat, 'pings failed, heating stopped')
+  const lapsesAt = heat.anchorAt + TTL_MS
+  const now = await $.clock.now()
+  if (now >= lapsesAt) return goCold($, heat, reason, lapsesAt)
+  heat.pingTimer = $.clock.after(lapsesAt - now, () => {
+    void goCold($, heat, reason, lapsesAt).catch(() => {})
+  })
+  await setView($, heat, { state: 'hot', nextPingAt: 0, warmUntil: lapsesAt, lapsedAt: 0, reason })
+}
+
+// When the cache lapses if every ping until the hours cap reads it: an hour
+// after the last ping due before the cap, or after the current anchor when
+// none is.
+function warmUntil(heat: Heat, nextPingAt: number) {
+  const interval = heat.config.intervalMs
+  const later = Math.max(0, Math.ceil((heat.doneAt + capMs(heat) - nextPingAt) / interval))
+
+  return nextPingAt + (later - 1) * interval + TTL_MS
 }
 
 async function schedule($: EngineInterface, heat: Heat, at: number) {
+  if (at - heat.doneAt >= capMs(heat)) return stopHeating($, heat, 'cap')
   cancelPing(heat)
   const now = await $.clock.now()
   pingLater($, heat, Math.max(0, at - now))
-  await setView($, {
+  await setView($, heat, {
     state: 'hot',
     nextPingAt: at,
-    pings: heat.pings,
-    maxPings: Math.floor(capMs(heat) / heat.config.intervalMs),
-    until: heat.doneAt + capMs(heat),
+    warmUntil: warmUntil(heat, at),
     lapsedAt: 0,
     reason: null,
   })
@@ -225,10 +297,10 @@ async function ping($: EngineInterface, heat: Heat) {
   heat.pingTimer = null
   if (heat.isBusy || !(await read($, isEnabled))) return
   const startedAt = await $.clock.now()
-  // Timers don't run while the Mac sleeps: a ping due during sleep fires
+  // Timers don't run while the machine sleeps: a ping due during sleep fires
   // after wake, and past the TTL it would only pay to rebuild the cache.
   if (startedAt - heat.anchorAt >= TTL_MS) return goCold($, heat, 'slept', heat.anchorAt + TTL_MS)
-  if (startedAt - heat.doneAt >= capMs(heat)) return goCold($, heat, 'cap', heat.anchorAt + TTL_MS)
+  if (startedAt - heat.doneAt >= capMs(heat)) return stopHeating($, heat, 'cap')
 
   const reply = await $.model.fork({ prompt: PING_PROMPT })
   // A turn started meanwhile: it refreshes the cache and re-arms heating.
@@ -242,12 +314,11 @@ async function ping($: EngineInterface, heat: Heat) {
       return
     }
 
-    return goCold($, heat, 'error', heat.anchorAt + TTL_MS)
+    return stopHeating($, heat, 'error')
   }
   if (heat.prefixTokens > 0 && reply.usage.cache_read_input_tokens < heat.prefixTokens * HIT_RATIO) {
     return goCold($, heat, 'miss', startedAt)
   }
-  heat.pings += 1
   heat.anchorAt = startedAt
   await schedule($, heat, heat.anchorAt + heat.config.intervalMs)
 }
@@ -256,7 +327,7 @@ async function ping($: EngineInterface, heat: Heat) {
 // write) stops heating instead of leaving an unhandled rejection behind.
 function pingLater($: EngineInterface, heat: Heat, ms: number) {
   heat.pingTimer = $.clock.after(ms, () => {
-    void ping($, heat).catch(() => goCold($, heat, 'error', heat.anchorAt + TTL_MS).catch(() => {}))
+    void ping($, heat).catch(() => stopHeating($, heat, 'error').catch(() => {}))
   })
 }
 
@@ -276,9 +347,8 @@ export const register: Register = on => {
     doneAt: 0,
     anchorAt: 0,
     prefixTokens: 0,
-    pings: 0,
     pingTimer: null,
-    revealTimer: null,
+    tickTimer: null,
     caffeine: null,
   }
 
@@ -314,7 +384,8 @@ export const register: Register = on => {
       heat.isBusy = true
       cancelPing(heat)
       stopCaffeine(heat)
-      heat.revealTimer?.cancel()
+      heat.tickTimer?.cancel()
+      heat.tickTimer = null
       $.ui.invalidate('ui.render')
     }
 
@@ -339,9 +410,8 @@ export const register: Register = on => {
     if (!e.agentId) {
       heat.isBusy = false
       heat.doneAt = await $.clock.now()
-      heat.pings = 0
-      heat.revealTimer = $.clock.after(AWAY_MS, () => $.ui.invalidate('ui.render'))
       await arm($, heat)
+      await redrawLater($, heat)
     }
 
     return completed
@@ -350,12 +420,13 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     cancelPing(heat)
     stopCaffeine(heat)
+    heat.tickTimer?.cancel()
+    heat.tickTimer = null
     await writeStateFile($, e.sessionId, 'off')
     // After /clear the process goes on under a new session with no cache yet.
     heat.anchorAt = 0
     heat.prefixTokens = 0
     heat.doneAt = 0
-    heat.pings = 0
 
     return next(e)
   })
@@ -367,7 +438,7 @@ export const register: Register = on => {
     if (!isOn) {
       cancelPing(heat)
       stopCaffeine(heat)
-      await setView($, { ...(await read($, view)), state: 'off', nextPingAt: 0 })
+      await setView($, heat, { ...(await read($, view)), state: 'off', nextPingAt: 0 })
 
       return { text: 'Session Heating is off for this session.' }
     }
@@ -375,7 +446,7 @@ export const register: Register = on => {
     // Nothing to keep warm yet (no turn since start or reload): show it as on;
     // the next turn arms it.
     const current = await read($, view)
-    if (current.state === 'off') await setView($, { ...current, state: 'hot', nextPingAt: 0 })
+    if (current.state === 'off') await setView($, heat, { ...current, state: 'hot', nextPingAt: 0, warmUntil: 0, reason: null })
 
     return { text: 'Session Heating is on for this session.' }
   }).catch(() => ({ text: 'Session Heating could not change its state.' }))
@@ -387,34 +458,49 @@ export const register: Register = on => {
 
     const { Box, Text } = $.ui.resolve(e)
     const v = await read($, view)
+    if (v.state === 'off' && !heat.config.showOff) return next(e)
     const icon = (e.surface === 'terminal' && heat.config.nerdFont ? NERD : UNICODE)[v.state]
-    const lapse = v.lapsedAt > now ? 'lapses' : 'lapsed'
     const why: Record<ColdReason, string> = {
       miss: 'cache miss',
-      slept: 'Mac slept',
-      cap: `${heat.config.capHours}h cap`,
+      slept: 'machine slept',
+      cap: 'pings capped',
       error: 'pings failed',
     }
+    const rel = heat.config.relativeTime
+    const ping = rel ? `ping in ${until(v.nextPingAt, now)}` : `ping at ${clockTime(heat, v.nextPingAt)}`
+    // ~ once pings have stopped: the cache is not documented to live the full hour.
+    const about = v.reason ? '~' : ''
+    const warm = rel ? `for ${about}${until(v.warmUntil, now)}` : `until ${about}${clockTime(heat, v.warmUntil)}`
+    const cold = rel ? `for ${span(now - v.lapsedAt)}` : `since ${clockTime(heat, v.lapsedAt)}`
 
     const full: Record<HeatState, string> = {
-      hot: v.nextPingAt
-        ? `heating · next ping ${hhmm(v.nextPingAt)} · ${v.pings}/${v.maxPings} · until ${hhmm(v.until)}`
-        : 'heating',
-      cold: v.lapsedAt ? `cold · ${lapse} ${hhmm(v.lapsedAt)}${v.reason ? ` (${why[v.reason]})` : ''}` : 'cold',
-      off: 'off',
+      hot: v.warmUntil ? `session warm ${warm}` : 'session warm',
+      cold: v.lapsedAt ? `session cold ${cold}` : 'session cold',
+      off: 'session heating off',
     }
     const compact: Record<HeatState, string> = {
-      hot: v.nextPingAt ? `${hhmm(v.nextPingAt)} · ${v.pings}/${v.maxPings}` : '',
-      cold: v.lapsedAt ? hhmm(v.lapsedAt) : '',
+      hot: v.warmUntil ? `warm ${warm}` : 'warm',
+      cold: v.lapsedAt ? `cold ${cold}` : 'cold',
+      off: 'off',
+    }
+    // The full band's right end. Reaching the cap is how heating ends: the
+    // cold band doesn't repeat it.
+    const detail: Record<HeatState, string> = {
+      hot: v.nextPingAt ? ping : v.reason ? why[v.reason] : '',
+      cold: v.reason && v.reason !== 'cap' ? why[v.reason] : '',
       off: '',
     }
     const text = (heat.config.compact ? compact : full)[v.state]
+    const right = heat.config.compact ? '' : detail[v.state]
 
     return (
       // One blank row above: the recap row above the band has no margin below it.
-      <Box marginTop={1}>
-        <Text color={COLOR[v.state]}>{icon}</Text>
-        {text && <Text dimColor> {text}</Text>}
+      <Box marginTop={1} width={e.props.bodyColumns} justifyContent="space-between">
+        <Box>
+          <Text color={COLOR[v.state]}>{icon}</Text>
+          <Text dimColor> {text}</Text>
+        </Box>
+        {right && <Text dimColor>{right}</Text>}
       </Box>
     )
   })
