@@ -1,6 +1,6 @@
 {
   "name": "session-heating",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Session Heating: keeps the session's prompt cache warm while you're away",
   "author": { "name": "Markus Füreder" },
   "types": "./types/index.d.ts"

@@ -242,6 +242,35 @@ test('band redraws when the away delay ends and on each countdown minute', async
   expect(redraws).toEqual([60, 120, 180, 240, 300, 320, 360])
 })
 
+test('SHOW_ABOVE_PROMPT_PERMANENTLY=yes shows the band during and right after a turn', async ($, on) => {
+  engine(on)
+  mock.clock(on, { now: 1_000_000 })
+  mock.env(on, { HOME: '/nowhere', CLAUDE_CODE_SESSION_HEATING_CAFFEINATE: 'no', CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT_PERMANENTLY: 'yes' })
+  on('fs.write', async () => ({ value: undefined }))
+  on('turn.step', async function* () {
+    return {
+      turnId: 't1', index: 0, answer: 'hi', toolUses: [], stopReason: 'end_turn',
+      usage: { model: 'm', input_tokens: 1, output_tokens: 1, cache_read_input_tokens: 10_000, cache_creation_input_tokens: 0 },
+    }
+  })
+  const props = { hasSurvey: false, isWorking: false, maxRows: 3 } as never
+  await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'hi', turnId: 't1' })
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'm', messageCount: 1 })) {
+    // drain
+  }
+  await $.turn.complete({ turnId: 't1', answer: 'hi', durationMs: 1, isAborted: false, reason: 'answer' })
+  const after = await $.ui.mount({ plugin: 'session-heating', surface: 'terminal', component: 'AbovePrompt', props })
+  expect(await after.find({ text: ' session warm for 12h 40m' })).not.toBe(undefined)
+  expect(await after.find({ text: 'ping in 50m' })).not.toBe(undefined)
+  await after.unmount()
+
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  const during = await $.ui.mount({ plugin: 'session-heating', surface: 'terminal', component: 'AbovePrompt', props })
+  expect(await during.find({ text: ' session warm' })).not.toBe(undefined)
+  expect(await during.find({ text: /ping/ })).toBe(undefined)
+})
+
 test('ABOVE_PROMPT_SHOW_OFF=no draws no band while heating is off', async ($, on) => {
   engine(on)
   const clock = mock.clock(on, { now: 1_000_000 })

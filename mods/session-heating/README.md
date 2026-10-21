@@ -97,11 +97,105 @@ and shows a toast.
 | `CLAUDE_CODE_SESSION_HEATING_NERD_FONT` | `no` | Nerd Font icons (the statusline also needs `CLAUDE_CODE_STATUS_BAR_NERD_FONT=yes`) |
 | `CLAUDE_CODE_SESSION_HEATING_SHOW_IN_STATUSLINE` | `no` | Icon after the model in the statusline |
 | `CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT` | `yes` | Band above the prompt while you're away |
+| `CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT_PERMANENTLY` | `no` | Show the band all the time, also during a turn and the 5 minutes after it |
 | `CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_SHOW_OFF` | `yes` | Show the band while heating is off for the session; `no` draws nothing then |
 | `CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_COMPACT` | `no` | Compact band instead of the full line |
 | `CLAUDE_CODE_SESSION_HEATING_RELATIVE_TIME` | `yes` | Times in the band as spans (`ping in 12m`); `no` shows clock times (`ping at 14:52`) |
 | `CLAUDE_CODE_SESSION_HEATING_24H_CLOCK` | `yes` | Clock times on a 24-hour clock (`14:52`); `no` shows a 12-hour clock (`2:52pm`) |
-| `CLAUDE_CODE_SESSION_HEATING_SHOW_TOAST` | `yes` | Toasts on a cache miss, the cap and invalid values |
+| `CLAUDE_CODE_SESSION_HEATING_SHOW_TOAST` | `yes` | Toasts when heating stops and on invalid settings |
+
+The mod reads these when a session starts and on `/reload-plugins`. A change in
+`settings.json` reaches a running session on `/reload-plugins`; a change in the
+shell profile reaches only CLI sessions started from a shell that loaded it.
+
+### Variables
+
+#### `CLAUDE_CODE_SESSION_HEATING_MINUTES`
+
+Default `50`. Minutes from the start of the last request that read or wrote the
+cache to the next ping. A whole number, clamped to 29–59: a ping must land
+inside the one-hour cache lifetime. A lower value leaves more room for a late
+ping, and costs more pings over the same time away.
+
+#### `CLAUDE_CODE_SESSION_HEATING_HOURS_CAP`
+
+Default `12`. Hours after the end of the last turn during which pings are sent.
+A whole number, clamped to 1–32. No ping is sent past the cap. The cache then
+stays warm until an hour after the last ping: the band shows
+`session warm for ~48m · pings capped`, and turns cold when the cache lapses.
+With the defaults, 12 hours away is at most 14 pings.
+
+#### `CLAUDE_CODE_SESSION_HEATING_CAFFEINATE`
+
+Default `yes`. Runs `caffeinate -s` while heating, so the Mac does not go to
+sleep on AC power and miss a ping. It stops when a turn starts, after the last
+ping before the cap, and when heating goes cold or is turned off. On battery
+`-s` has no effect. Without `caffeinate` on the machine, heating goes on
+without it.
+
+#### `CLAUDE_CODE_SESSION_HEATING_CAFFEINATE_ALSO_ON_BATTERY`
+
+Default `no`. Adds `-i` to `caffeinate`, which holds off idle sleep on battery
+too. The Mac then stays awake on battery for up to the hours cap. Only takes
+effect with `CLAUDE_CODE_SESSION_HEATING_CAFFEINATE` on.
+
+#### `CLAUDE_CODE_SESSION_HEATING_NERD_FONT`
+
+Default `no`. Nerd Font icons in the band (`md-radiator`, `md-snowflake`,
+`md-radiator_off`) instead of the Unicode ones (`♨`, `❆`, `◌`). The band uses
+them in the terminal only; the desktop app always shows the Unicode ones. The
+statusline in this repo also reads this variable, together with
+`CLAUDE_CODE_STATUS_BAR_NERD_FONT=yes`.
+
+#### `CLAUDE_CODE_SESSION_HEATING_SHOW_IN_STATUSLINE`
+
+Default `no`. Read by the statusline in this repo, not by the mod: with `yes`
+or `1` it shows the state icon after the model. The statusline takes no other
+values and shows no toast for them.
+
+#### `CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT`
+
+Default `yes`. Draws the band above the prompt. With `no` the mod draws nothing
+there; heating itself goes on. To show the band in the desktop app but not in
+the CLI, leave this out of `settings.json` and set `no` in the shell profile:
+a value in `settings.json` would override the shell's.
+
+#### `CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT_PERMANENTLY`
+
+Default `no`: the band shows only while you're away, hidden during a turn and
+for 5 minutes after it. With `yes` it shows all the time. During a turn, which
+writes the cache itself, it reads `session warm` with no time or detail. Before
+the first turn of a session it shows nothing either way: there is no cache yet.
+
+#### `CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_SHOW_OFF`
+
+Default `yes`: while heating is off for the session (`/session-heating off`),
+the band reads `session heating off`. With `no` it draws nothing then. The
+statusline icon is not affected.
+
+#### `CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_COMPACT`
+
+Default `no`. With `yes` the band shows the state and its time only
+(`warm for 11h 50m`, `cold for 2h 5m`, `off`), without `session` and without
+the detail at the right end.
+
+#### `CLAUDE_CODE_SESSION_HEATING_RELATIVE_TIME`
+
+Default `yes`: times in the band are spans from now (`ping in 12m`,
+`for 11h 50m`, `cold for 2h 5m`), redrawn the moment they change. With `no`
+they are clock times (`ping at 14:52`, `until 02:30`, `since 12:35`).
+
+#### `CLAUDE_CODE_SESSION_HEATING_24H_CLOCK`
+
+Default `yes`: clock times on a 24-hour clock (`14:52`). With `no` a 12-hour
+clock (`2:52pm`). Only takes effect with
+`CLAUDE_CODE_SESSION_HEATING_RELATIVE_TIME=no`.
+
+#### `CLAUDE_CODE_SESSION_HEATING_SHOW_TOAST`
+
+Default `yes`. Toasts when heating stops (a cache miss, the machine slept, the
+hours cap, failed pings), when a setting is invalid, and when `idleCompaction`
+is not `false`. With `no` none of them shows.
 
 ## Display
 
@@ -112,7 +206,10 @@ and shows a toast.
 | Off: turned off for this session | `◌` | `md-radiator_off` | grey (256-color 242) |
 
 The band above the prompt shows only while you're away: it is hidden during a
-turn and for 5 minutes after it. It redraws the moment a countdown shows a
+turn and for 5 minutes after it. With
+`CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT_PERMANENTLY=yes` it shows all the
+time; during a turn, which writes the cache itself, it reads `session warm`
+with no time or detail. It redraws the moment a countdown shows a
 new minute, so its countdowns stay current.
 
 | State | Relative (default) | Clock times |

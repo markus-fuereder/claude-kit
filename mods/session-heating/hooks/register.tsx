@@ -22,7 +22,7 @@ import type { ColdReason, HeatState, HeatView } from '../types'
 const MINUTE = 60_000
 const TTL_MS = 60 * MINUTE
 // The band shows only while you're away: hidden during a main-thread turn and
-// for AWAY_MS after it ends. While away it redraws the moment a countdown
+// for AWAY_MS after it ends, unless it is set to show permanently. While away it redraws the moment a countdown
 // shows a new minute, so its countdowns stay current.
 const AWAY_MS = 5 * MINUTE
 const RETRY_MS = 2 * MINUTE
@@ -51,6 +51,7 @@ type Config = {
   caffeinateOnBattery: boolean
   nerdFont: boolean
   showBand: boolean
+  showAlways: boolean
   compact: boolean
   showOff: boolean
   relativeTime: boolean
@@ -65,6 +66,7 @@ const DEFAULT_CONFIG: Config = {
   caffeinateOnBattery: false,
   nerdFont: false,
   showBand: true,
+  showAlways: false,
   compact: false,
   showOff: true,
   relativeTime: true,
@@ -123,6 +125,7 @@ async function loadConfig($: EngineInterface, problems: string[]): Promise<Confi
   const caffeinateOnBattery = await $.env.get('CLAUDE_CODE_SESSION_HEATING_CAFFEINATE_ALSO_ON_BATTERY')
   const nerdFont = await $.env.get('CLAUDE_CODE_SESSION_HEATING_NERD_FONT')
   const showBand = await $.env.get('CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT')
+  const showAlways = await $.env.get('CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT_PERMANENTLY')
   const compact = await $.env.get('CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_COMPACT')
   const showOff = await $.env.get('CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_SHOW_OFF')
   const relativeTime = await $.env.get('CLAUDE_CODE_SESSION_HEATING_RELATIVE_TIME')
@@ -141,6 +144,7 @@ async function loadConfig($: EngineInterface, problems: string[]): Promise<Confi
     ),
     nerdFont: flag('CLAUDE_CODE_SESSION_HEATING_NERD_FONT', nerdFont, false, problems),
     showBand: flag('CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT', showBand, true, problems),
+    showAlways: flag('CLAUDE_CODE_SESSION_HEATING_SHOW_ABOVE_PROMPT_PERMANENTLY', showAlways, false, problems),
     compact: flag('CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_COMPACT', compact, false, problems),
     showOff: flag('CLAUDE_CODE_SESSION_HEATING_ABOVE_PROMPT_SHOW_OFF', showOff, true, problems),
     relativeTime: flag('CLAUDE_CODE_SESSION_HEATING_RELATIVE_TIME', relativeTime, true, problems),
@@ -452,12 +456,17 @@ export const register: Register = on => {
   }).catch(() => ({ text: 'Session Heating could not change its state.' }))
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (!heat.config.showBand || !heat.isEligible || e.props.hasSurvey || heat.isBusy || heat.doneAt === 0) return next(e)
+    if (!heat.config.showBand || !heat.isEligible || e.props.hasSurvey || heat.doneAt === 0) return next(e)
     const now = await $.clock.now()
-    if (now - heat.doneAt < AWAY_MS) return next(e)
+    if (!heat.config.showAlways && (heat.isBusy || now - heat.doneAt < AWAY_MS)) return next(e)
 
     const { Box, Text } = $.ui.resolve(e)
-    const v = await read($, view)
+    const stored = await read($, view)
+    // A turn writes the cache itself: while it runs the band shows it warm,
+    // with no countdown or detail until the turn ends and re-arms heating.
+    const v: HeatView = heat.isBusy
+      ? { ...stored, state: stored.state === 'off' ? 'off' : 'hot', nextPingAt: 0, warmUntil: 0, reason: null }
+      : stored
     if (v.state === 'off' && !heat.config.showOff) return next(e)
     const icon = (e.surface === 'terminal' && heat.config.nerdFont ? NERD : UNICODE)[v.state]
     const why: Record<ColdReason, string> = {
