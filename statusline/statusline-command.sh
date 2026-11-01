@@ -2,7 +2,7 @@
 # Claude Code status line — two rows.
 #
 #   󰫆 Opus 5 ❯ my-project ⎇  feat/add-login-page
-#   C 34% ▦1M · S 08%󰅀10 ↺04:06 · W 09%󰅀02 ↺6d 05:16
+#   C 34% ▦1M · W 09%󰅀02 ↺6d 05:16 · S 08%󰅀10 ↺04:06
 #
 #   row 1  effort model ❯ folder ⎇  branch
 #   row 2  context usage and window size · 5-hour pace, limit and reset
@@ -212,7 +212,7 @@ if [ -n "$branch" ]; then
   row1="${row1}${GREY}${branch}${RESET}"
 fi
 
-# ── row 2: C ctx% ▦size · S five% chevron pace ↺reset · W … ↺reset ──
+# ── row 2: C ctx% ▦size · W week% chevron pace ↺reset · S … ↺reset ──
 #
 # Pace glyphs carry direction and, by chevron count, severity — deliberately
 # redundant with the colour so the row still reads under colourblindness, glare
@@ -364,7 +364,7 @@ r2_width
 [ "$R2W" -gt "$budget" ] && [ -n "$five_cd" ] && { five_cd=""; rebuild; r2_width; }
 
 row2=""
-for part in "$ctx_c" "$five_c" "$week_c"; do
+for part in "$ctx_c" "$week_c" "$five_c"; do
   [ -z "$part" ] && continue
   if [ -z "$row2" ]; then row2="$part"; else row2="${row2}${DOT}${part}"; fi
 done

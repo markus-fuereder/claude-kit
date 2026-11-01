@@ -4,7 +4,7 @@ A two-row statusline command for Claude Code.
 
 ```
 ⁖ Opus 5 ❯ my-project ⎇  feat/add-login-page
-C 34% ▦1M · S 08%▿10 ↺04:06 · W 09%▿02 ↺6d 05:16
+C 34% ▦1M · W 09%▿02 ↺6d 05:16 · S 08%▿10 ↺04:06
 ```
 
 This is the default look, drawn with characters every monospace font has.
@@ -12,7 +12,7 @@ This is the default look, drawn with characters every monospace font has.
 Font icons.
 
 - Row 1: effort, model, folder and git branch.
-- Row 2: context usage and window size; the 5-hour and weekly rate limits, each
+- Row 2: context usage and window size; the weekly and 5-hour rate limits, each
   with its pace (usage minus elapsed time) and reset countdown.
 
 Every part is colored by severity, and the pace glyphs carry direction and
