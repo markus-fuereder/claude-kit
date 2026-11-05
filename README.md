@@ -6,6 +6,7 @@ Anthropic project.
 | Part | What it is | Docs |
 | --- | --- | --- |
 | [Session Heating](mods/session-heating) | A mod that keeps a session's prompt cache warm while you're away | [README](mods/session-heating/README.md) |
+| [astack](https://github.com/markus-fuereder/astack) | A plugin: the agentic engineering harness (decision interviews, planning gates, an independent code gate), in its own repository | [README](https://github.com/markus-fuereder/astack#readme) |
 | [Statusline](statusline) | A two-row statusline command: model, effort, folder, branch, context, rate limits and pace | [README](statusline/README.md) |
 
 The two work on their own. Together, the statusline shows Session Heating's
@@ -23,6 +24,18 @@ In Claude Code:
 
 Session Heating needs `"idleCompaction": false` in `~/.claude/settings.json`.
 See its [README](mods/session-heating/README.md) for why and for its settings.
+
+### astack
+
+astack lives in its own repository; this marketplace pins its release. The repository is private for now, so installing needs read access to it. See the astack README for the team-workspace install at project scope.
+
+```sh
+claude plugin marketplace add markus-fuereder/claude-kit
+```
+
+```sh
+claude plugin install astack@claude-kit
+```
 
 ### Statusline
 

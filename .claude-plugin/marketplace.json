@@ -1,11 +1,22 @@
 {
   "name": "claude-kit",
-  "owner": { "name": "Markus Füreder" },
+  "owner": {
+    "name": "Markus Füreder"
+  },
   "plugins": [
     {
       "name": "session-heating",
       "source": "./mods/session-heating",
       "description": "Session Heating: keeps the session's prompt cache warm while you're away"
+    },
+    {
+      "name": "astack",
+      "source": {
+        "source": "github",
+        "repo": "markus-fuereder/astack",
+        "ref": "v0.5.0"
+      },
+      "description": "Agentic engineering harness: decision interviews, planning gates and an independent code gate for Claude Code"
     }
   ]
 }
