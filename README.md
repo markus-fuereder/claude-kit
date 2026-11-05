@@ -27,7 +27,7 @@ See its [README](mods/session-heating/README.md) for why and for its settings.
 
 ### astack
 
-astack lives in its own repository; this marketplace pins its release. The repository is private for now, so installing needs read access to it. See the astack README for the team-workspace install at project scope.
+astack lives in its own repository; this marketplace follows its `stable` branch, which moves to each release. The repository is private for now, so installing needs read access to it. See the astack README for the team-workspace install at project scope.
 
 ```sh
 claude plugin marketplace add markus-fuereder/claude-kit
