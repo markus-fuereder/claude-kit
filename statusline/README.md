@@ -11,7 +11,8 @@ This is the default look, drawn with characters every monospace font has.
 `CLAUDE_CODE_STATUS_BAR_NERD_FONT` swaps the effort and pace glyphs for Nerd
 Font icons.
 
-- Row 1: effort, model, folder and git branch.
+- Row 1: effort, model, xistack version (inside an xistack workspace only),
+  folder and git branch.
 - Row 2: context usage and window size; the weekly and 5-hour rate limits, each
   with its pace (usage minus elapsed time) and reset countdown.
 
@@ -66,3 +67,27 @@ writes, and shows its state after the model:
 | Off: turned off for the session | `◌` | `md-radiator_off` | grey (256-color 242) |
 
 Without the mod, no state file exists and no icon is shown.
+
+## xistack version
+
+Inside an [xistack](https://github.com/frameleap/xistack) workspace, row 1
+shows the xistack version in use between the model and the folder:
+
+```
+⁖ Opus 5 ❯ Ξ 0.8.2 ❯ my-workspace ⎇  main
+```
+
+There is no switch. xistack's hooks write the version the session runs from to
+`~/.claude/xistack/sessions/<session-id>` on session start and on every
+prompt: one line, `<version> <epoch seconds>`, or `dev <epoch seconds>` when
+xistack is loaded through `--plugin-dir`. The script reads that file, so it
+shows the version loaded in this session, not the one installed last. Sessions
+without xistack have no file and show nothing.
+
+`/reload-plugins` runs no hook, so after an update and a reload the file still
+names the old version until the next prompt. For that case the script compares
+the file with `~/.claude/plugins/installed_plugins.json`. When they differ and
+the transcript has a `/reload-plugins` after the file was written, the
+installed version is shown, because a reload loads the installed copy.
+
+On a narrow terminal the segment is dropped before the folder.

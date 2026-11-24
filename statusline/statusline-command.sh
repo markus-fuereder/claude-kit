@@ -4,7 +4,7 @@
 #   󰫆 Opus 5 ❯ my-project ⎇  feat/add-login-page
 #   C 34% ▦1M · W 09%󰅀02 ↺6d 05:16 · S 08%󰅀10 ↺04:06
 #
-#   row 1  effort model ❯ folder ⎇  branch
+#   row 1  effort model ❯ [Ξ xistack version ❯] folder ⎇  branch
 #   row 2  context usage and window size · 5-hour pace, limit and reset
 #          countdown · weekly pace, limit and reset countdown
 #
@@ -37,10 +37,32 @@ if [[ $CLAUDE_CODE_SESSION_HEATING_SHOW_IN_STATUSLINE == 1 || $CLAUDE_CODE_SESSI
   fi
 fi
 
+# xistack writes the version it runs from to
+# ~/.claude/xistack/sessions/<session_id> on SessionStart and on every
+# UserPromptSubmit: one line, "<version> <epoch seconds>", or "dev <epoch>" when
+# loaded through --plugin-dir. Only sessions where xistack is enabled have the
+# file, so this shows inside an xistack workspace and nowhere else. Read with
+# `read` like the Session Heating file: no fork.
+xi=; xi_at=
+jq_xi=()
+if [[ $input =~ \"session_id\":\ *\"([^\"]+)\" ]]; then
+  xi_file="$HOME/.claude/xistack/sessions/${BASH_REMATCH[1]}"
+  xi_line=
+  [ -f "$xi_file" ] && IFS= read -r xi_line < "$xi_file"
+  if [[ $xi_line =~ ^([0-9][0-9A-Za-z.+-]*|dev)\ ([0-9]+)$ ]]; then
+    xi=${BASH_REMATCH[1]}; xi_at=${BASH_REMATCH[2]}
+  fi
+fi
+# /reload-plugins fires no hook, so the file lags a reload until the next
+# prompt. A reload loads the installed copy, so the installed version is read
+# too, and compared after the jq pass.
+ip="$HOME/.claude/plugins/installed_plugins.json"
+[ -n "$xi" ] && [ "$xi" != dev ] && [ -f "$ip" ] && jq_xi=(--slurpfile ip "$ip")
+
 # ── parse, format and count down in a single jq pass ─────────────────────────
 # Fields are '|'-separated: '|' is not IFS whitespace, so empty fields survive
 # `read` intact (tab and newline would collapse into one separator).
-read_fields=$(jq -r --arg heat "$heat_state" '
+read_fields=$(jq -r --arg heat "$heat_state" "${jq_xi[@]}" '
   def p2: tostring | if length < 2 then "0" + . else . end;
   def pct: if . == null then "" else (round | tostring) end;
   def countdown:
@@ -78,11 +100,31 @@ read_fields=$(jq -r --arg heat "$heat_state" '
   , (.workspace.current_dir // .cwd // "")
   , (.effort.level // "")
   , $heat
+    # Installed xistack for this project: a project or local install recorded
+    # for the project folder wins over a user install.
+  , ( (.workspace.project_dir // .cwd // "") as $pd
+      | [ ($ARGS.named.ip[0].plugins // {}) | to_entries[]
+          | select(.key | startswith("xistack@")) | .value[]
+          | select(.scope == "user" or .projectPath == $pd) ]
+      | sort_by(.scope == "user") | .[0].version // "" )
+  , (.transcript_path // "")
   ] | join("|")' <<<"$input")
 
 IFS='|' read -r model size ctx_pct five_pct week_pct five_cd week_cd \
-  pace5 paceW folder cwd effort heat \
+  pace5 paceW folder cwd effort heat xi_inst transcript \
   <<<"$read_fields"
+
+# The file's version differs from the installed one only between a plugin
+# update and the next prompt. Then the transcript decides: a /reload-plugins
+# after the file was written means the installed copy is loaded now. Otherwise
+# the update waits for a restart and the file is right. Only this case forks.
+# ponytail: update, reload, update again before a prompt shows the second
+# update early; a reload hook from Claude Code would remove the guess.
+if [ -n "$xi_inst" ] && [ "$xi_inst" != "$xi" ] && [ -f "$transcript" ]; then
+  xi_reload=$(grep -F '<command-name>/reload-plugins</command-name>' "$transcript" \
+    | jq -rs 'map(.timestamp // empty) | last // "" | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601? // 0' 2>/dev/null)
+  [ "${xi_reload:-0}" -gt "$xi_at" ] 2>/dev/null && xi=$xi_inst
+fi
 
 # CLAUDE_CODE_STATUS_BAR_MODEL_ABBR=yes (or 1) shortens the family name to its initial:
 # "Opus 5.5" -> "O5.5". A name without a version is left as is.
@@ -186,6 +228,7 @@ esac
 r1_width() {
   R1W=0
   [ -n "$model" ]  && R1W=$(( R1W + ${#model}${EFF_ICON:+ + 2}${HEAT_ICON:+ + 2} ))
+  [ -n "$xi" ]     && { [ "$R1W" -gt 0 ] && R1W=$(( R1W + 3 )); R1W=$(( R1W + 2 + ${#xi} )); }
   [ -n "$folder" ] && { [ "$R1W" -gt 0 ] && R1W=$(( R1W + 3 )); R1W=$(( R1W + ${#folder} )); }
   [ -n "$branch" ] && { [ "$R1W" -gt 0 ] && R1W=$(( R1W + 4 )); R1W=$(( R1W + ${#branch} )); }
 }
@@ -198,11 +241,18 @@ while [ "$R1W" -gt "$budget" ] && [ "${#branch}" -gt 8 ]; do
   branch="${branch:0:$keep}~"
   r1_width
 done
+[ "$R1W" -gt "$budget" ] && { xi="";     r1_width; }
 [ "$R1W" -gt "$budget" ] && { folder=""; r1_width; }
 [ "$R1W" -gt "$budget" ] && { model="";  r1_width; }
 
 row1=""
 [ -n "$model" ]  && row1="${EFF_ICON:+${MAGENTA}${EFF_ICON}${RESET} }${MAGENTA}${model}${RESET}${HEAT_ICON:+ ${HEAT_COL}${HEAT_ICON}${RESET}}"
+# xistack version: U+039E Greek capital Xi, xistack's own mark. Single-column
+# in a Western locale, so the width count holds.
+if [ -n "$xi" ]; then
+  [ -n "$row1" ] && row1="${row1}${ARR}"
+  row1="${row1}${YELLOW}Ξ ${xi}${RESET}"
+fi
 if [ -n "$folder" ]; then
   [ -n "$row1" ] && row1="${row1}${ARR}"
   row1="${row1}${CYAN}${folder}${RESET}"
